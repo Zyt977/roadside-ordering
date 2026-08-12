@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>🍞 路边摊自助点餐</title>
+<title>🍞 自助点餐</title>
 <style>
 /* ===== CSS Variables ===== */
 :root {
@@ -372,7 +372,7 @@ body {
   <div class="header-brand">
     <span class="header-logo">🍞</span>
     <div>
-      <div class="header-title">路边摊自助点餐</div>
+      <div class="header-title">自助点餐</div>
       <div class="header-subtitle">面包 · 饼干 · 鸡尾酒 <span id="syncStatus" style="font-size:12px" title="同步状态">☁️</span></div>
     </div>
   </div>
@@ -441,6 +441,7 @@ body {
       <label class="form-label">📝 订单备注</label>
       <textarea class="form-textarea" id="inputNote" placeholder="如：多放黄油、不要辣、放门口即可…" maxlength="200"></textarea>
     </div>
+    <div id="checkoutPaymentQR" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);text-align:center"></div>
     <button class="btn-checkout" onclick="submitOrder()">✅ 提交订单</button>
   </div>
 </div>
@@ -608,7 +609,7 @@ const DEFAULT_MENU = [
 const DEFAULT_SETTINGS = {
   adminPassword: 'admin888',
   merchantWechat: 'YourWeChatID',
-  shopName: '路边摊面包饼干鸡尾酒',
+  shopName: '面包饼干鸡尾酒',
   paymentQR: '',
 };
 
@@ -637,7 +638,7 @@ function settingsFromDB(s) {
   return {
     adminPassword: s.admin_password || 'admin888',
     merchantWechat: s.merchant_wechat || 'YourWeChatID',
-    shopName: s.shop_name || '路边摊面包饼干鸡尾酒',
+    shopName: s.shop_name || '面包饼干鸡尾酒',
     paymentQR: s.payment_qr || ''
   };
 }
@@ -781,7 +782,7 @@ async function clearOrdersFromDB() {
 var menu = [];
 var cart = [];
 var currentFilter = 'all';
-var settings = { adminPassword: 'admin888', merchantWechat: 'YourWeChatID', shopName: '路边摊面包饼干鸡尾酒', paymentQR: '' };
+var settings = { adminPassword: 'admin888', merchantWechat: 'YourWeChatID', shopName: '面包饼干鸡尾酒', paymentQR: '' };
 var isAdminLoggedIn = false;
 
 // ╔══════════════════════════════════════════╗
@@ -971,11 +972,36 @@ function toggleCart() {
 // ║           CHECKOUT FLOW                 ║
 // ╚══════════════════════════════════════════╝
 
+function renderPaymentQR(container, qrData) {
+  if (!qrData) { container.innerHTML = ''; return; }
+  var img = new Image();
+  img.onload = function() {
+    var c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.style.cssText = 'width:200px;height:200px;display:block;margin:0 auto;border-radius:8px;border:1px solid #ddd';
+    c.getContext('2d').drawImage(img, 0, 0);
+    container.innerHTML = '';
+    container.appendChild(c);
+    var hint = document.createElement('p');
+    hint.style.cssText = 'font-size:12px;color:#888;margin-top:6px';
+    hint.textContent = '👆 长按识别二维码付款';
+    container.appendChild(hint);
+  };
+  img.onerror = function() {
+    // Fallback to plain img
+    container.innerHTML = '<img src="' + qrData + '" style="width:200px;height:200px;display:block;margin:0 auto;border-radius:8px;border:1px solid #ddd"><p style="font-size:12px;color:#888;margin-top:6px">👆 长按识别二维码付款</p>';
+  };
+  img.src = qrData;
+}
+
 async function openCheckout() {
   if (cart.length === 0) { showToast('购物车是空的'); return; }
   // Refresh settings from cloud to ensure payment info is current
   try { settings = await loadSettings(); } catch(e) {}
   renderCheckoutSummary();
+  // Show payment QR in checkout page (canvas for WeChat compatibility)
+  var qrDiv = document.getElementById('checkoutPaymentQR');
+  renderPaymentQR(qrDiv, settings.paymentQR);
   document.getElementById('checkoutModal').classList.add('show');
   document.body.style.overflow = 'hidden';
 }
@@ -1038,11 +1064,7 @@ function submitOrder() {
   document.getElementById('merchantWechat').textContent = settings.merchantWechat;
   // Show payment QR if uploaded
   var qrDisplay = document.getElementById('paymentQRDisplay');
-  if (settings.paymentQR) {
-    qrDisplay.innerHTML = '<img src="' + settings.paymentQR + '" style="width:220px;height:220px;border-radius:12px;border:2px solid var(--border);object-fit:contain;display:block;margin:0 auto;touch-action:manipulation;-webkit-touch-callout:default" alt="收款码"><p style="font-size:13px;margin-top:8px;font-weight:600">👆 长按上方二维码 → 识别图中二维码 → 付款</p>';
-  } else {
-    qrDisplay.innerHTML = '';
-  }
+  renderPaymentQR(qrDisplay, settings.paymentQR);
   document.getElementById('btnCopy').classList.remove('copied');
   document.getElementById('btnCopy').textContent = '📋 一键复制订单';
   document.getElementById('checkoutModal').classList.remove('show');
