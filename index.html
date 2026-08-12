@@ -504,7 +504,77 @@ body {
 
 <script>
 // ╔══════════════════════════════════════════╗
-// ║         DATA LAYER (localStorage)       ║
+// ║         SUPABASE CLOUD BACKEND         ║
+// ╚══════════════════════════════════════════╝
+
+const SB_URL = 'https://vmbbcbsusewxisibslhi.supabase.co/rest/v1';
+const SB_ANON = 'sb_publishable_8FEybSg0vnJyiDbiLk0akg_PV07EwbI';
+var sbOnline = true;
+
+function sbHeaders() {
+  return { 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON, 'Content-Type': 'application/json' };
+}
+
+async function sbGet(table, query) {
+  try {
+    var url = SB_URL + '/' + table + '?' + (query || 'select=*');
+    var res = await fetch(url, { headers: sbHeaders() });
+    if (!res.ok) throw new Error(res.status);
+    var data = await res.json();
+    sbOnline = true;
+    return data;
+  } catch (e) {
+    sbOnline = false;
+    console.warn('Supabase GET failed:', e.message);
+    throw e;
+  }
+}
+
+async function sbPost(table, data) {
+  try {
+    var res = await fetch(SB_URL + '/' + table, {
+      method: 'POST', headers: sbHeaders(), body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error(res.status);
+    sbOnline = true;
+    return res.json();
+  } catch (e) { sbOnline = false; throw e; }
+}
+
+async function sbPatch(table, data, query) {
+  try {
+    var url = SB_URL + '/' + table + (query ? '?' + query : '');
+    var res = await fetch(url, {
+      method: 'PATCH', headers: sbHeaders(), body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error(res.status);
+    sbOnline = true;
+  } catch (e) { sbOnline = false; throw e; }
+}
+
+async function sbDelete(table, query) {
+  try {
+    await fetch(SB_URL + '/' + table + '?' + query, {
+      method: 'DELETE', headers: sbHeaders()
+    });
+    sbOnline = true;
+  } catch (e) { sbOnline = false; throw e; }
+}
+
+async function sbUpsert(table, data, query) {
+  try {
+    var url = SB_URL + '/' + table + (query ? '?' + query : '');
+    // Try PATCH first, if 0 rows affected, POST
+    var res = await fetch(url, {
+      method: 'PATCH', headers: sbHeaders(), body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(res.status);
+    sbOnline = true;
+  } catch (e) { sbOnline = false; throw e; }
+}
+
+// ╔══════════════════════════════════════════╗
+// ║         DATA LAYER (Supabase + fallback)║
 // ╚══════════════════════════════════════════╝
 
 const STORAGE_KEY = 'roadside_menu';
@@ -542,42 +612,156 @@ const DEFAULT_SETTINGS = {
   paymentQR: '',
 };
 
-// ---- Data helpers ----
-function loadMenu() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { /* ignore */ }
-  saveMenu(DEFAULT_MENU);
-  return [...DEFAULT_MENU];
+// ---- Supabase ↔ JS field mapping ----
+function menuFromDB(item) {
+  return {
+    id: (item.id || item.db_id || '').toString(),
+    category: item.category,
+    name: item.name,
+    emoji: item.emoji || '📦',
+    price: item.price,
+    desc: item.description || item.desc || '',
+    available: item.available !== false,
+    image: item.image || ''
+  };
 }
-function saveMenu(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function loadSettings() {
+function menuToDB(item) {
+  return {
+    category: item.category, name: item.name, emoji: item.emoji,
+    price: item.price, description: item.desc || item.description || '',
+    available: item.available, image: item.image || '', sort_order: 0
+  };
+}
+function settingsFromDB(s) {
+  return {
+    adminPassword: s.admin_password || 'admin888',
+    merchantWechat: s.merchant_wechat || 'YourWeChatID',
+    shopName: s.shop_name || '路边摊面包饼干鸡尾酒',
+    paymentQR: s.payment_qr || ''
+  };
+}
+function settingsToDB(s) {
+  return {
+    id: 1, admin_password: s.adminPassword, merchant_wechat: s.merchantWechat,
+    shop_name: s.shopName, payment_qr: s.paymentQR || ''
+  };
+}
+
+// ---- Data helpers (async, Supabase first) ----
+async function loadMenu() {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    var rows = await sbGet('menu_items', 'select=*&order=sort_order.asc');
+    var items = rows.map(menuFromDB);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return items;
+  } catch (e) {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e2) {}
+    saveMenuLocal(DEFAULT_MENU);
+    return [...DEFAULT_MENU];
+  }
+}
+
+function saveMenuLocal(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+async function saveMenu(data) {
+  saveMenuLocal(data);
+  // Sync to Supabase: delete all then insert
+  try {
+    var existing = await sbGet('menu_items', 'select=id');
+    for (var i = 0; i < existing.length; i++) {
+      await sbDelete('menu_items', 'id=eq.' + existing[i].id).catch(function(){});
+    }
+    for (var i = 0; i < data.length; i++) {
+      await sbPost('menu_items', menuToDB(data[i])).catch(function(){});
+    }
+  } catch (e) { console.warn('Supabase sync failed:', e); }
+}
+
+async function loadSettings() {
+  try {
+    var rows = await sbGet('settings', 'select=*&id=eq.1');
+    if (rows && rows.length > 0) {
+      var s = settingsFromDB(rows[0]);
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+      return { ...DEFAULT_SETTINGS, ...s };
+    }
+  } catch (e) {}
+  try {
+    var raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-  } catch (e) { /* ignore */ }
+  } catch (e2) {}
   return { ...DEFAULT_SETTINGS };
 }
-function saveSettings(data) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(data)); }
-function loadOrders() {
+
+async function saveSettingsData(data) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
   try {
-    const raw = localStorage.getItem(ORDERS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { /* ignore */ }
-  return [];
+    await sbUpsert('settings', settingsToDB(data), 'id=eq.1');
+  } catch (e) { console.warn('Settings sync failed:', e); }
 }
-function saveOrders(data) { localStorage.setItem(ORDERS_KEY, JSON.stringify(data)); }
+
+async function loadOrders() {
+  try {
+    var rows = await sbGet('orders', 'select=*&order=created_at.desc');
+    var orders = rows.map(function(o) {
+      return {
+        id: o.order_id || o.id.toString(),
+        time: o.created_at,
+        items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items,
+        total: o.total, address: o.address || '', phone: o.phone || '', note: o.note || ''
+      };
+    });
+    localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+    return orders;
+  } catch (e) {
+    try {
+      var raw = localStorage.getItem(ORDERS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e2) {}
+    return [];
+  }
+}
+
+function saveOrdersLocal(data) { localStorage.setItem(ORDERS_KEY, JSON.stringify(data)); }
+
+async function addOrderToDB(order) {
+  try {
+    await sbPost('orders', {
+      order_id: order.id, items: order.items, total: order.total,
+      address: order.address, phone: order.phone, note: order.note,
+      created_at: order.time
+    }, true);
+  } catch (e) { console.warn('Order sync failed:', e); }
+}
+
+async function deleteOrderFromDB(orderId) {
+  try {
+    // Try by order_id first
+    await sbDelete('orders', 'order_id=eq.' + encodeURIComponent(orderId));
+  } catch (e) { console.warn('Order delete failed:', e); }
+}
+
+async function clearOrdersFromDB() {
+  try {
+    var existing = await sbGet('orders', 'select=id');
+    for (var i = 0; i < existing.length; i++) {
+      await sbDelete('orders', 'id=eq.' + existing[i].id).catch(function(){});
+    }
+  } catch (e) { console.warn('Orders clear failed:', e); }
+}
 
 // ╔══════════════════════════════════════════╗
 // ║              STATE                      ║
 // ╚══════════════════════════════════════════╝
 
-let menu = loadMenu();
-let cart = [];
-let currentFilter = 'all';
-let settings = loadSettings();
-let isAdminLoggedIn = false;
+var menu = [];
+var cart = [];
+var currentFilter = 'all';
+var settings = { adminPassword: 'admin888', merchantWechat: 'YourWeChatID', shopName: '路边摊面包饼干鸡尾酒', paymentQR: '' };
+var isAdminLoggedIn = false;
 
 // ╔══════════════════════════════════════════╗
 // ║              CART LOGIC                 ║
@@ -809,19 +993,22 @@ function submitOrder() {
   text += '━━━━━━━━━━━━━━━━\n';
   text += `💳 请微信转账至：${settings.merchantWechat}`;
 
-  // Save order to local storage
-  const orders = loadOrders();
-  orders.unshift({
+  // Save order to Supabase + local
+  var orderObj = {
     id: Date.now().toString(36),
     time: now.toISOString(),
-    items: cart.map(c => {
+    items: cart.map(function(c) {
       const m = menu.find(i => i.id === c.id);
       return { name: m?.name || '未知', emoji: m?.emoji || '📦', qty: c.qty, price: m?.price || 0, note: c.note };
     }),
     total: cartTotal(),
-    address, phone, note
-  });
-  saveOrders(orders);
+    address: address, phone: phone, note: note
+  };
+  addOrderToDB(orderObj).catch(function() {});
+  loadOrders().then(function(orders) {
+    orders.unshift(orderObj);
+    saveOrdersLocal(orders);
+  }).catch(function() {});
 
   // Show success
   document.getElementById('orderText').textContent = text;
@@ -946,45 +1133,50 @@ function renderAdminPanel(tab) {
 }
 
 function renderAdminDashboard() {
-  var orders = loadOrders();
-  var today = new Date().toLocaleDateString('zh-CN');
-  var todayOrders = orders.filter(function(o) {
-    return new Date(o.time).toLocaleDateString('zh-CN') === today;
-  });
-  var todayRevenue = todayOrders.reduce(function(s, o) { return s + o.total; }, 0);
-  var activeItems = menu.filter(function(m) { return m.available; }).length;
-  var totalItems = menu.length;
+  var target = document.getElementById('adminTabContent');
+  loadOrders().then(function(orders) {
+    if (!document.getElementById('adminTabContent')) return;
+    var today = new Date().toLocaleDateString('zh-CN');
+    var todayOrders = orders.filter(function(o) {
+      return new Date(o.time).toLocaleDateString('zh-CN') === today;
+    });
+    var todayRevenue = todayOrders.reduce(function(s, o) { return s + o.total; }, 0);
+    var activeItems = menu.filter(function(m) { return m.available; }).length;
+    var totalItems = menu.length;
 
-  var html = '<div class="dashboard-grid">';
-  html += '<div class="stat-card"><div class="stat-num">' + todayOrders.length + '</div><div class="stat-label">📅 今日订单</div></div>';
-  html += '<div class="stat-card"><div class="stat-num accent">¥' + todayRevenue + '</div><div class="stat-label">💰 今日营业额</div></div>';
-  html += '<div class="stat-card"><div class="stat-num">' + activeItems + '</div><div class="stat-label">✅ 在售商品</div></div>';
-  html += '<div class="stat-card"><div class="stat-num">' + totalItems + '</div><div class="stat-label">📦 总商品数</div></div>';
-  html += '</div>';
+    var html = '<div class="dashboard-grid">';
+    html += '<div class="stat-card"><div class="stat-num">' + todayOrders.length + '</div><div class="stat-label">📅 今日订单</div></div>';
+    html += '<div class="stat-card"><div class="stat-num accent">¥' + todayRevenue + '</div><div class="stat-label">💰 今日营业额</div></div>';
+    html += '<div class="stat-card"><div class="stat-num">' + activeItems + '</div><div class="stat-label">✅ 在售商品</div></div>';
+    html += '<div class="stat-card"><div class="stat-num">' + totalItems + '</div><div class="stat-label">📦 总商品数</div></div>';
+    html += '</div>';
 
-  // Recent orders
-  html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot bread"></span>最近订单</div>';
-  var recent = orders.slice(0, 5);
-  if (recent.length === 0) {
-    html += '<p style="color:var(--text-secondary);font-size:13px;padding:12px 0">暂无订单</p>';
-  } else {
-    for (var i = 0; i < recent.length; i++) {
-      var o = recent[i];
-      html += '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center">';
-      html += '<div><span style="font-weight:600">' + new Date(o.time).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) + '</span> ' + o.items.map(function(i){return i.emoji+i.name+'×'+i.qty}).join(' ') + '</div>';
-      html += '<span style="font-weight:700;color:var(--accent)">¥' + o.total + '</span></div>';
+    html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot bread"></span>最近订单</div>';
+    var recent = orders.slice(0, 5);
+    if (recent.length === 0) {
+      html += '<p style="color:var(--text-secondary);font-size:13px;padding:12px 0">暂无订单</p>';
+    } else {
+      for (var i = 0; i < recent.length; i++) {
+        var o = recent[i];
+        html += '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center">';
+        html += '<div><span style="font-weight:600">' + new Date(o.time).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) + '</span> ' + o.items.map(function(i){return (i.emoji||'📦')+i.name+'×'+i.qty}).join(' ') + '</div>';
+        html += '<span style="font-weight:700;color:var(--accent)">¥' + o.total + '</span></div>';
+      }
     }
-  }
 
-  // Quick actions
-  html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot cocktail"></span>快捷操作</div>';
-  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-  html += '<button class="btn btn-primary" onclick="renderAdminPanel(\'menu\')" style="flex:1;min-width:100px">➕ 添加菜品</button>';
-  html += '<button class="btn" onclick="renderAdminPanel(\'orders\')" style="flex:1;min-width:100px">📦 查看订单</button>';
-  html += '<button class="btn" onclick="renderAdminPanel(\'settings\')" style="flex:1;min-width:100px">⚙️ 店铺设置</button>';
-  html += '</div>';
+    html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot cocktail"></span>快捷操作</div>';
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    html += '<button class="btn btn-primary" onclick="renderAdminPanel(\'menu\')" style="flex:1;min-width:100px">➕ 添加菜品</button>';
+    html += '<button class="btn" onclick="renderAdminPanel(\'orders\')" style="flex:1;min-width:100px">📦 查看订单</button>';
+    html += '<button class="btn" onclick="renderAdminPanel(\'settings\')" style="flex:1;min-width:100px">⚙️ 店铺设置</button>';
+    html += '</div>';
 
-  return html;
+    document.getElementById('adminTabContent').innerHTML = html;
+  }).catch(function() {
+    if (document.getElementById('adminTabContent'))
+      document.getElementById('adminTabContent').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+  });
+  return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
 }
 
 function renderAdminMenu() {
@@ -1015,25 +1207,41 @@ function renderAdminMenu() {
 }
 
 function renderAdminOrders() {
-  const orders = loadOrders();
-  if (orders.length === 0) return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">暂无订单记录</p>';
-  return orders.map(function(o) {
-    var timeStr = new Date(o.time).toLocaleString('zh-CN');
-    var itemsStr = o.items.map(function(i) { return i.emoji + ' ' + i.name + ' ×' + i.qty; }).join(' · ');
-    var noteHtml = o.note ? '<div style="font-size:12px;color:var(--text-secondary)">📝 ' + escHtml(o.note) + '</div>' : '';
-    return '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-        '<span style="font-weight:700;font-size:13px">🕐 ' + timeStr + '</span>' +
-        '<span style="font-weight:800;color:var(--accent)">¥' + o.total + '</span>' +
-      '</div>' +
-      '<div style="font-size:13px">' + itemsStr + '</div>' +
-      '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">📍 ' + escHtml(o.address) + ' · 📞 ' + escHtml(o.phone) + '</div>' +
-      noteHtml +
-      '<div style="text-align:right;margin-top:8px">' +
-        '<button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger);font-size:11px" onclick="deleteOrder(\'' + o.id + '\')">🗑 删除</button>' +
-      '</div>' +
-    '</div>';
-  }).join('');
+  var target = document.getElementById('adminTabContent');
+  loadOrders().then(function(orders) {
+    if (!document.getElementById('adminTabContent')) return;
+    var html;
+    if (orders.length === 0) {
+      html = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">暂无订单记录</p>';
+    } else {
+      html = orders.map(function(o) {
+        return buildOrderCardHtml(o);
+      }).join('');
+    }
+    document.getElementById('adminTabContent').innerHTML = html;
+  }).catch(function() {
+    if (document.getElementById('adminTabContent'))
+      document.getElementById('adminTabContent').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+  });
+  return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
+}
+
+function buildOrderCardHtml(o) {
+  var timeStr = new Date(o.time).toLocaleString('zh-CN');
+  var itemsStr = o.items.map(function(i) { return (i.emoji||'📦') + ' ' + i.name + ' ×' + i.qty; }).join(' · ');
+  var noteHtml = o.note ? '<div style="font-size:12px;color:var(--text-secondary)">📝 ' + escHtml(o.note) + '</div>' : '';
+  return '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+      '<span style="font-weight:700;font-size:13px">🕐 ' + timeStr + '</span>' +
+      '<span style="font-weight:800;color:var(--accent)">¥' + o.total + '</span>' +
+    '</div>' +
+    '<div style="font-size:13px">' + itemsStr + '</div>' +
+    '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">📍 ' + escHtml(o.address) + ' · 📞 ' + escHtml(o.phone) + '</div>' +
+    noteHtml +
+    '<div style="text-align:right;margin-top:8px">' +
+      '<button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger);font-size:11px" onclick="deleteOrder(\'' + o.id + '\')">🗑 删除</button>' +
+    '</div>' +
+  '</div>';
 }
 
 function renderAdminSettings() {
@@ -1075,7 +1283,7 @@ function saveAdminSettings() {
   if (newPwd) settings.adminPassword = newPwd;
 
   var doSave = function() {
-    saveSettings(settings);
+    saveSettingsData(settings).catch(function(){});
     checkStorageUsage();
     isAdminLoggedIn = true;
     showToast('设置已保存');
@@ -1269,8 +1477,10 @@ function deleteItem(itemId) {
 
 function deleteOrder(orderId) {
   if (!confirm('确定删除这条订单记录吗？')) return;
-  const orders = loadOrders();
-  saveOrders(orders.filter(o => o.id !== orderId));
+  deleteOrderFromDB(orderId).catch(function(){});
+  loadOrders().then(function(orders) {
+    saveOrdersLocal(orders.filter(function(o) { return o.id !== orderId; }));
+  }).catch(function(){});
   renderAdminPanel('orders');
   showToast('订单已删除');
 }
@@ -1287,7 +1497,8 @@ function resetMenu() {
 
 function clearOrders() {
   if (!confirm('确定清空所有订单记录吗？')) return;
-  saveOrders([]);
+  clearOrdersFromDB().catch(function(){});
+  saveOrdersLocal([]);
   renderAdminPanel('orders');
   showToast('订单记录已清空');
 }
@@ -1888,11 +2099,12 @@ var qrcode = function() {
 // ║              INIT                       ║
 // ╚══════════════════════════════════════════╝
 
-function init() {
+async function init() {
+  menu = await loadMenu();
+  settings = await loadSettings();
   renderMenu();
   updateCartUI();
-  // Handle back button to close panels
-  window.addEventListener('popstate', (e) => {
+  window.addEventListener('popstate', function(e) {
     if (document.getElementById('cartPanel').classList.contains('show')) toggleCart();
     if (document.getElementById('checkoutModal').classList.contains('show')) closeCheckout();
     if (document.getElementById('successModal').classList.contains('show')) closeSuccess();
@@ -1901,7 +2113,7 @@ function init() {
   });
 }
 
-init();
+init().catch(function(e) { console.error('Init failed:', e); });
 </script>
 
 </body>
