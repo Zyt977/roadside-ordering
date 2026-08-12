@@ -374,10 +374,11 @@ body {
     <span class="header-logo">🍞</span>
     <div>
       <div class="header-title">路边摊自助点餐</div>
-      <div class="header-subtitle">面包 · 饼干 · 鸡尾酒</div>
+      <div class="header-subtitle">面包 · 饼干 · 鸡尾酒 <span id="syncStatus" style="font-size:12px" title="同步状态">☁️</span></div>
     </div>
   </div>
   <div class="header-actions">
+    <button class="btn btn-sm" onclick="refreshData()" title="刷新数据" id="refreshBtn">🔄</button>
     <button class="btn btn-sm" onclick="openQRModal()" title="分享点餐码">📱 点餐码</button>
     <button class="btn-icon" onclick="toggleCart()" id="cartBtn">
       🛒<span class="cart-badge" id="cartBadge" style="display:none">0</span>
@@ -625,11 +626,12 @@ function menuFromDB(item) {
     image: item.image || ''
   };
 }
-function menuToDB(item) {
+function menuToDB(item, index) {
   return {
     category: item.category, name: item.name, emoji: item.emoji,
     price: item.price, description: item.desc || item.description || '',
-    available: item.available, image: item.image || '', sort_order: 0
+    available: item.available, image: item.image || '',
+    sort_order: (typeof index === 'number') ? index : 0
   };
 }
 function settingsFromDB(s) {
@@ -651,13 +653,25 @@ function settingsToDB(s) {
 async function loadMenu() {
   try {
     var rows = await sbGet('menu_items', 'select=*&order=sort_order.asc');
-    var items = rows.map(menuFromDB);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    return items;
-  } catch (e) {
+    if (rows && rows.length > 0) {
+      var items = rows.map(menuFromDB);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      return items;
+    }
+    // Table is empty — seed from localStorage or defaults
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        var localItems = JSON.parse(raw);
+        if (localItems.length > 0) return localItems;
+      }
+    } catch (e2) {}
+    saveMenuLocal(DEFAULT_MENU);
+    return [...DEFAULT_MENU];
+  } catch (e) {
+    try {
+      var raw2 = localStorage.getItem(STORAGE_KEY);
+      if (raw2) return JSON.parse(raw2);
     } catch (e2) {}
     saveMenuLocal(DEFAULT_MENU);
     return [...DEFAULT_MENU];
@@ -675,9 +689,17 @@ async function saveMenu(data) {
       await sbDelete('menu_items', 'id=eq.' + existing[i].id).catch(function(){});
     }
     for (var i = 0; i < data.length; i++) {
-      await sbPost('menu_items', menuToDB(data[i])).catch(function(){});
+      await sbPost('menu_items', menuToDB(data[i], i)).catch(function(){});
     }
-  } catch (e) { console.warn('Supabase sync failed:', e); }
+    sbOnline = true;
+    updateSyncStatus('online');
+    return true;
+  } catch (e) {
+    sbOnline = false;
+    updateSyncStatus('offline');
+    console.warn('Supabase sync failed:', e);
+    return false;
+  }
 }
 
 async function loadSettings() {
@@ -950,8 +972,10 @@ function toggleCart() {
 // ║           CHECKOUT FLOW                 ║
 // ╚══════════════════════════════════════════╝
 
-function openCheckout() {
+async function openCheckout() {
   if (cart.length === 0) { showToast('购物车是空的'); return; }
+  // Refresh settings from cloud to ensure payment info is current
+  try { settings = await loadSettings(); } catch(e) {}
   renderCheckoutSummary();
   document.getElementById('checkoutModal').classList.add('show');
   document.body.style.overflow = 'hidden';
@@ -1133,16 +1157,20 @@ function renderAdminPanel(tab) {
 }
 
 function renderAdminDashboard() {
-  var target = document.getElementById('adminTabContent');
-  loadOrders().then(function(orders) {
-    if (!document.getElementById('adminTabContent')) return;
+  var targetId = 'adminTabContent';
+  Promise.all([loadOrders(), loadMenu()]).then(function(results) {
+    var orders = results[0];
+    var freshMenu = results[1];
+    if (!document.getElementById(targetId)) return;
+    // Update global menu with fresh data
+    menu = freshMenu;
     var today = new Date().toLocaleDateString('zh-CN');
     var todayOrders = orders.filter(function(o) {
       return new Date(o.time).toLocaleDateString('zh-CN') === today;
     });
     var todayRevenue = todayOrders.reduce(function(s, o) { return s + o.total; }, 0);
-    var activeItems = menu.filter(function(m) { return m.available; }).length;
-    var totalItems = menu.length;
+    var activeItems = freshMenu.filter(function(m) { return m.available; }).length;
+    var totalItems = freshMenu.length;
 
     var html = '<div class="dashboard-grid">';
     html += '<div class="stat-card"><div class="stat-num">' + todayOrders.length + '</div><div class="stat-label">📅 今日订单</div></div>';
@@ -1171,23 +1199,27 @@ function renderAdminDashboard() {
     html += '<button class="btn" onclick="renderAdminPanel(\'settings\')" style="flex:1;min-width:100px">⚙️ 店铺设置</button>';
     html += '</div>';
 
-    document.getElementById('adminTabContent').innerHTML = html;
+    document.getElementById(targetId).innerHTML = html;
   }).catch(function() {
-    if (document.getElementById('adminTabContent'))
-      document.getElementById('adminTabContent').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+    if (document.getElementById(targetId))
+      document.getElementById(targetId).innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
   });
   return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
 }
 
 function renderAdminMenu() {
-  const categories = { bread: '🍞 面包', cookie: '🍪 饼干', cocktail: '🍸 鸡尾酒' };
-  let html = '<button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="showAddForm()">＋ 添加新菜品</button>';
-  html += '<div id="addFormContainer"></div>';
-  for (const [cat, catName] of Object.entries(categories)) {
-    const items = menu.filter(m => m.category === cat);
-    html += `<div class="cat-label"><span class="cat-dot ${cat}"></span>${catName} (${items.length})</div>`;
-    for (const item of items) {
-      html += `
+  var targetId = 'adminTabContent';
+  loadMenu().then(function(freshMenu) {
+    menu = freshMenu;
+    if (!document.getElementById(targetId)) return;
+    const categories = { bread: '🍞 面包', cookie: '🍪 饼干', cocktail: '🍸 鸡尾酒' };
+    let html = '<button class="btn btn-primary" style="width:100%;margin-bottom:16px" onclick="showAddForm()">＋ 添加新菜品</button>';
+    html += '<div id="addFormContainer"></div>';
+    for (const [cat, catName] of Object.entries(categories)) {
+      const items = freshMenu.filter(m => m.category === cat);
+      html += `<div class="cat-label"><span class="cat-dot ${cat}"></span>${catName} (${items.length})</div>`;
+      for (const item of items) {
+        html += `
         <div class="admin-item">
           <div class="admin-item-emoji">${renderItemImg(item, 'item-thumb-sm')}</div>
           <div class="admin-item-info">
@@ -1200,16 +1232,22 @@ function renderAdminMenu() {
             <button class="btn-del" onclick="deleteItem('${item.id}')" title="删除">✕</button>
           </div>
         </div>`;
+      }
+      if (items.length === 0) html += '<p style="color:var(--text-secondary);font-size:13px;padding:8px 0">暂无菜品</p>';
     }
-    if (items.length === 0) html += '<p style="color:var(--text-secondary);font-size:13px;padding:8px 0">暂无菜品</p>';
-  }
-  return html;
+    document.getElementById(targetId).innerHTML = html;
+    checkStorageUsage();
+  }).catch(function() {
+    if (document.getElementById(targetId))
+      document.getElementById(targetId).innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+  });
+  return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
 }
 
 function renderAdminOrders() {
-  var target = document.getElementById('adminTabContent');
+  var targetId = 'adminTabContent';
   loadOrders().then(function(orders) {
-    if (!document.getElementById('adminTabContent')) return;
+    if (!document.getElementById(targetId)) return;
     var html;
     if (orders.length === 0) {
       html = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">暂无订单记录</p>';
@@ -1218,10 +1256,10 @@ function renderAdminOrders() {
         return buildOrderCardHtml(o);
       }).join('');
     }
-    document.getElementById('adminTabContent').innerHTML = html;
+    document.getElementById(targetId).innerHTML = html;
   }).catch(function() {
-    if (document.getElementById('adminTabContent'))
-      document.getElementById('adminTabContent').innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+    if (document.getElementById(targetId))
+      document.getElementById(targetId).innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
   });
   return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
 }
@@ -1245,10 +1283,14 @@ function buildOrderCardHtml(o) {
 }
 
 function renderAdminSettings() {
-  var paymentQrHtml = settings.paymentQR
-    ? '<img src="' + settings.paymentQR + '" style="max-width:180px;max-height:180px;border-radius:var(--radius-sm);border:2px solid var(--border);margin-bottom:8px">'
-    : '';
-  return `
+  var targetId = 'adminTabContent';
+  loadSettings().then(function(freshSettings) {
+    settings = freshSettings;
+    if (!document.getElementById(targetId)) return;
+    var paymentQrHtml = settings.paymentQR
+      ? '<img src="' + settings.paymentQR + '" style="max-width:180px;max-height:180px;border-radius:var(--radius-sm);border:2px solid var(--border);margin-bottom:8px">'
+      : '';
+    document.getElementById(targetId).innerHTML = `
     <div class="form-group">
       <label class="form-label">🏪 店铺名称</label>
       <input class="form-input" id="setShopName" value="${escHtml(settings.shopName)}">
@@ -1274,6 +1316,11 @@ function renderAdminSettings() {
       <button class="btn" style="flex:1;color:var(--danger);border-color:var(--danger)" onclick="clearOrders()">🗑 清空订单记录</button>
     </div>
   `;
+  }).catch(function() {
+    if (document.getElementById(targetId))
+      document.getElementById(targetId).innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载失败，请检查网络</p>';
+  });
+  return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">加载中...</p>';
 }
 
 function saveAdminSettings() {
@@ -1283,10 +1330,14 @@ function saveAdminSettings() {
   if (newPwd) settings.adminPassword = newPwd;
 
   var doSave = function() {
-    saveSettingsData(settings).catch(function(){});
+    saveSettingsData(settings).then(function() {
+      showToast('设置已保存并同步 ✅');
+    }).catch(function() {
+      showToast('已保存到本地，云端同步失败 ⚠️');
+    });
     checkStorageUsage();
     isAdminLoggedIn = true;
-    showToast('设置已保存');
+    updateSyncStatus(sbOnline ? 'online' : 'offline');
   };
 
   var qrFile = document.getElementById('paymentQRFile');
@@ -1350,18 +1401,18 @@ function addNewItem() {
   if (!name) { showToast('请输入菜品名称'); return; }
   if (price <= 0) { showToast('请输入有效价格'); return; }
 
-  var doAdd = function(imageData) {
+  var doAdd = async function(imageData) {
     var newItem = {
       id: Date.now().toString(36),
       category: cat, emoji: emoji, name: name, desc: desc, price: price,
       available: true, image: imageData || ''
     };
     menu.unshift(newItem);
-    saveMenu(menu);
+    var synced = await saveMenu(menu);
     checkStorageUsage();
     renderMenu();
     renderAdminPanel('menu');
-    showToast('已添加：' + emoji + ' ' + name);
+    showToast((synced ? '已添加 ✅' : '已添加（云端同步失败）') + ' ' + emoji + ' ' + name);
   };
 
   var fileInput = document.getElementById('addImageFile');
@@ -1433,14 +1484,14 @@ function saveEditItem(itemId) {
   if (!item.name) { showToast('请输入菜品名称'); return; }
   if (item.price <= 0) { showToast('请输入有效价格'); return; }
 
-  var doSave = function(imageData) {
+  var doSave = async function(imageData) {
     if (imageData) item.image = imageData;
     else if (imageData === '') item.image = ''; // explicitly cleared
-    saveMenu(menu);
+    var synced = await saveMenu(menu);
     checkStorageUsage();
     renderMenu();
     renderAdminPanel('menu');
-    showToast('已更新：' + item.emoji + ' ' + item.name);
+    showToast((synced ? '已更新 ✅' : '已更新（云端同步失败）') + ' ' + item.emoji + ' ' + item.name);
   };
 
   var fileInput = document.getElementById('editImageFile');
@@ -1451,24 +1502,24 @@ function saveEditItem(itemId) {
   }
 }
 
-function toggleItemAvailable(itemId) {
+async function toggleItemAvailable(itemId) {
   const item = menu.find(m => m.id === itemId);
   if (!item) return;
   item.available = !item.available;
-  saveMenu(menu);
+  await saveMenu(menu);
   renderMenu();
   renderAdminPanel('menu');
   updateCartUI();
   showToast(item.available ? `已上架：${item.name}` : `已下架：${item.name}`);
 }
 
-function deleteItem(itemId) {
+async function deleteItem(itemId) {
   const item = menu.find(m => m.id === itemId);
   if (!item) return;
   if (!confirm(`确定删除「${item.name}」吗？此操作不可恢复。`)) return;
   menu = menu.filter(m => m.id !== itemId);
   cart = cart.filter(c => c.id !== itemId);
-  saveMenu(menu);
+  await saveMenu(menu);
   renderMenu();
   renderAdminPanel('menu');
   updateCartUI();
@@ -1479,20 +1530,26 @@ function deleteOrder(orderId) {
   if (!confirm('确定删除这条订单记录吗？')) return;
   deleteOrderFromDB(orderId).catch(function(){});
   loadOrders().then(function(orders) {
-    saveOrdersLocal(orders.filter(function(o) { return o.id !== orderId; }));
+    var filtered = orders.filter(function(o) { return o.id !== orderId; });
+    saveOrdersLocal(filtered);
+    // Refresh the orders view if admin panel is open
+    if (document.getElementById('adminModal').classList.contains('show')) {
+      var activeTab = document.querySelector('.admin-tab.active');
+      if (activeTab && activeTab.textContent.includes('订单')) renderAdminPanel('orders');
+    }
   }).catch(function(){});
   renderAdminPanel('orders');
   showToast('订单已删除');
 }
 
-function resetMenu() {
+async function resetMenu() {
   if (!confirm('确定恢复为默认菜单吗？您添加和修改的菜品将全部丢失。')) return;
   menu = [...DEFAULT_MENU];
-  saveMenu(menu);
+  var synced = await saveMenu(menu);
   renderMenu();
   renderAdminPanel('menu');
   updateCartUI();
-  showToast('菜单已恢复默认');
+  showToast(synced ? '菜单已恢复默认并同步 ✅' : '菜单已恢复默认（云端同步失败）');
 }
 
 function clearOrders() {
@@ -2099,11 +2156,65 @@ var qrcode = function() {
 // ║              INIT                       ║
 // ╚══════════════════════════════════════════╝
 
+async function refreshData(showMsg) {
+  var btn = document.getElementById('refreshBtn');
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+  try {
+    menu = await loadMenu();
+    settings = await loadSettings();
+    renderMenu();
+    updateCartUI();
+    // Also refresh admin panel if open
+    if (isAdminLoggedIn && document.getElementById('adminModal').classList.contains('show')) {
+      var activeTab = document.querySelector('.admin-tab.active');
+      if (activeTab) {
+        var tabText = activeTab.textContent;
+        if (tabText.includes('概览')) renderAdminPanel('dashboard');
+        else if (tabText.includes('菜品')) renderAdminPanel('menu');
+        else if (tabText.includes('订单')) renderAdminPanel('orders');
+        else if (tabText.includes('设置')) renderAdminPanel('settings');
+      }
+    }
+    updateSyncStatus('online');
+    if (btn) { btn.textContent = '✅'; setTimeout(function() { btn.textContent = '🔄'; }, 1000); }
+    if (showMsg !== false) showToast('数据已同步 ✅');
+  } catch(e) {
+    updateSyncStatus('offline');
+    if (btn) { btn.textContent = '⚠️'; btn.disabled = false; setTimeout(function() { btn.textContent = '🔄'; }, 2000); }
+    if (showMsg !== false) showToast('同步失败，请检查网络 ⚠️');
+  }
+}
+
+function updateSyncStatus(status) {
+  var el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (status === 'online') {
+    el.textContent = '☁️';
+    el.title = '已连接云同步';
+    el.style.opacity = '0.6';
+  } else {
+    el.textContent = '📵';
+    el.title = '离线，使用本地缓存';
+    el.style.opacity = '1';
+  }
+}
+
 async function init() {
   menu = await loadMenu();
   settings = await loadSettings();
   renderMenu();
   updateCartUI();
+  updateSyncStatus(sbOnline ? 'online' : 'offline');
+
+  // Auto-refresh when user returns to the page
+  var lastRefresh = Date.now();
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && Date.now() - lastRefresh > 10000) {
+      lastRefresh = Date.now();
+      refreshData(false);
+    }
+  });
+
   window.addEventListener('popstate', function(e) {
     if (document.getElementById('cartPanel').classList.contains('show')) toggleCart();
     if (document.getElementById('checkoutModal').classList.contains('show')) closeCheckout();
