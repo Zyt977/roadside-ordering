@@ -654,6 +654,17 @@ async function loadMenu() {
     var rows = await sbGet('menu_items', 'select=*&order=sort_order.asc');
     if (rows && rows.length > 0) {
       var items = rows.map(menuFromDB);
+      // Only trust Supabase data if it's reasonably complete (≥ 3 items, or ≥ localStorage count)
+      var localRaw = localStorage.getItem(STORAGE_KEY);
+      var localItems = [];
+      try { if (localRaw) localItems = JSON.parse(localRaw); } catch(e) {}
+      if (items.length >= 3 || items.length >= localItems.length) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+        return items;
+      }
+      // Supabase data looks incomplete — keep localStorage
+      if (localItems.length > 0) return localItems;
+      // If nothing local either, use what Supabase has
       localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
       return items;
     }
@@ -661,8 +672,8 @@ async function loadMenu() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        var localItems = JSON.parse(raw);
-        if (localItems.length > 0) return localItems;
+        var cachedItems = JSON.parse(raw);
+        if (cachedItems.length > 0) return cachedItems;
       }
     } catch (e2) {}
     saveMenuLocal(DEFAULT_MENU);
@@ -681,14 +692,16 @@ function saveMenuLocal(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(
 
 async function saveMenu(data) {
   saveMenuLocal(data);
-  // Sync to Supabase: delete all then insert
   try {
-    var existing = await sbGet('menu_items', 'select=id');
-    for (var i = 0; i < existing.length; i++) {
-      await sbDelete('menu_items', 'id=eq.' + existing[i].id).catch(function(){});
-    }
+    // Insert new items FIRST, then delete old ones
+    // This way if inserts fail, old data is preserved
+    var oldIds = await sbGet('menu_items', 'select=id').catch(function(){ return []; });
     for (var i = 0; i < data.length; i++) {
       await sbPost('menu_items', menuToDB(data[i], i)).catch(function(){});
+    }
+    // Remove old items
+    for (var j = 0; j < oldIds.length; j++) {
+      await sbDelete('menu_items', 'id=eq.' + oldIds[j].id).catch(function(){});
     }
     sbOnline = true;
     updateSyncStatus('online');
@@ -1675,7 +1688,7 @@ function escHtml(s) {
 
 // Image upload: FileReader → compressed base64
 function handleImageUpload(file, callback, maxKB) {
-  maxKB = maxKB || 80;
+  maxKB = maxKB || 15;
   if (!file) return;
   if (!file.type.match(/image\/(jpeg|png|webp|gif)/)) {
     showToast('仅支持 JPG/PNG/WebP/GIF 图片');
