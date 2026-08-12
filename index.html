@@ -131,10 +131,15 @@ body {
 .menu-card:hover { box-shadow: var(--shadow-lg); }
 .menu-card.unavailable { opacity: 0.5; pointer-events: none; }
 .card-emoji {
-  font-size: 48px; text-align: center; padding: 16px 0 8px;
-  background: var(--bg); min-height: 80px; display: flex;
-  align-items: center; justify-content: center;
+  font-size: 48px; text-align: center; padding: 0; background: var(--bg);
+  min-height: 80px; display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
 }
+.card-emoji .item-thumb {
+  width: 100%; height: 120px; object-fit: cover; display: block;
+}
+.item-thumb-sm { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; font-size: 28px; display: inline-flex; align-items: center; justify-content: center; }
+.card-emoji .item-thumb-sm { width: 36px; height: 36px; }
 .card-body { padding: 10px 12px 12px; flex: 1; display: flex; flex-direction: column; }
 .card-name { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
 .card-desc { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; flex: 1; }
@@ -343,6 +348,16 @@ body {
 }
 .toast.show { opacity: 1; }
 
+/* ===== Dashboard Stats ===== */
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.stat-card {
+  background: var(--surface); border-radius: var(--radius-sm); padding: 16px 14px;
+  text-align: center; box-shadow: var(--shadow); border: 1.5px solid var(--border);
+}
+.stat-num { font-size: 28px; font-weight: 800; color: var(--text); }
+.stat-num.accent { color: var(--accent); }
+.stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
 /* ===== Responsive ===== */
 @media (min-width: 768px) {
   .menu-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
@@ -441,7 +456,8 @@ body {
       <div class="order-text" id="orderText"></div>
       <button class="btn-copy" id="btnCopy" onclick="copyOrder()">📋 一键复制订单</button>
       <button class="btn-wechat" onclick="openWechat()">💬 打开微信发送</button>
-      <div class="payment-hint">
+      <div class="payment-hint" id="paymentHint">
+        <div id="paymentQRDisplay" style="text-align:center;margin-bottom:8px"></div>
         💡 <strong>支付方式：</strong>请通过微信转账付款，商家确认后即安排制作配送。<br>
         微信号：<strong id="merchantWechat"></strong>
       </div>
@@ -497,32 +513,33 @@ const ORDERS_KEY = 'roadside_orders';
 
 const DEFAULT_MENU = [
   // 面包
-  { id: 'b1', category: 'bread', name: '法式长棍面包', emoji: '🥖', price: 12, desc: '外脆里软，经典法式', available: true },
-  { id: 'b2', category: 'bread', name: '全麦吐司', emoji: '🍞', price: 15, desc: '全麦健康，厚切四片', available: true },
-  { id: 'b3', category: 'bread', name: '牛角面包', emoji: '🥐', price: 10, desc: '层层酥脆，黄油飘香', available: true },
-  { id: 'b4', category: 'bread', name: '肉桂卷', emoji: '🫓', price: 18, desc: '肉桂焦糖，甜蜜温暖', available: true },
-  { id: 'b5', category: 'bread', name: '蒜香面包', emoji: '🧄', price: 8, desc: '蒜香四溢，外酥里嫩', available: true },
-  { id: 'b6', category: 'bread', name: '红豆面包', emoji: '🫘', price: 10, desc: '软糯红豆馅，早餐首选', available: true },
+  { id: 'b1', category: 'bread', name: '法式长棍面包', emoji: '🥖', price: 12, desc: '外脆里软，经典法式', available: true, image: '' },
+  { id: 'b2', category: 'bread', name: '全麦吐司', emoji: '🍞', price: 15, desc: '全麦健康，厚切四片', available: true, image: '' },
+  { id: 'b3', category: 'bread', name: '牛角面包', emoji: '🥐', price: 10, desc: '层层酥脆，黄油飘香', available: true, image: '' },
+  { id: 'b4', category: 'bread', name: '肉桂卷', emoji: '🫓', price: 18, desc: '肉桂焦糖，甜蜜温暖', available: true, image: '' },
+  { id: 'b5', category: 'bread', name: '蒜香面包', emoji: '🧄', price: 8, desc: '蒜香四溢，外酥里嫩', available: true, image: '' },
+  { id: 'b6', category: 'bread', name: '红豆面包', emoji: '🫘', price: 10, desc: '软糯红豆馅，早餐首选', available: true, image: '' },
   // 饼干
-  { id: 'c1', category: 'cookie', name: '黄油曲奇', emoji: '🍪', price: 12, desc: '经典黄油，入口即化', available: true },
-  { id: 'c2', category: 'cookie', name: '巧克力饼干', emoji: '🍫', price: 10, desc: '浓郁可可，酥脆可口', available: true },
-  { id: 'c3', category: 'cookie', name: '燕麦葡萄干饼干', emoji: '🥣', price: 8, desc: '健康燕麦，嚼劲十足', available: true },
-  { id: 'c4', category: 'cookie', name: '抹茶饼干', emoji: '🍵', price: 15, desc: '日式抹茶，清新回甘', available: true },
-  { id: 'c5', category: 'cookie', name: '芝士饼干', emoji: '🧀', price: 18, desc: '咸香芝士，追剧必备', available: true },
-  { id: 'c6', category: 'cookie', name: '姜味饼干', emoji: '🫚', price: 10, desc: '暖姜风味，冬季限定', available: true },
+  { id: 'c1', category: 'cookie', name: '黄油曲奇', emoji: '🍪', price: 12, desc: '经典黄油，入口即化', available: true, image: '' },
+  { id: 'c2', category: 'cookie', name: '巧克力饼干', emoji: '🍫', price: 10, desc: '浓郁可可，酥脆可口', available: true, image: '' },
+  { id: 'c3', category: 'cookie', name: '燕麦葡萄干饼干', emoji: '🥣', price: 8, desc: '健康燕麦，嚼劲十足', available: true, image: '' },
+  { id: 'c4', category: 'cookie', name: '抹茶饼干', emoji: '🍵', price: 15, desc: '日式抹茶，清新回甘', available: true, image: '' },
+  { id: 'c5', category: 'cookie', name: '芝士饼干', emoji: '🧀', price: 18, desc: '咸香芝士，追剧必备', available: true, image: '' },
+  { id: 'c6', category: 'cookie', name: '姜味饼干', emoji: '🫚', price: 10, desc: '暖姜风味，冬季限定', available: true, image: '' },
   // 鸡尾酒
-  { id: 'd1', category: 'cocktail', name: '莫吉托', emoji: '🍸', price: 35, desc: '薄荷青柠，清爽一夏', available: true },
-  { id: 'd2', category: 'cocktail', name: '长岛冰茶', emoji: '🧊', price: 40, desc: '经典长饮，后劲十足', available: true },
-  { id: 'd3', category: 'cocktail', name: '玛格丽特', emoji: '🍹', price: 38, desc: '龙舌兰与青柠的碰撞', available: true },
-  { id: 'd4', category: 'cocktail', name: '金汤力', emoji: '🥂', price: 30, desc: '经典金酒，简约不简单', available: true },
-  { id: 'd5', category: 'cocktail', name: '威士忌酸', emoji: '🥃', price: 35, desc: '波本威士忌，酸甜平衡', available: true },
-  { id: 'd6', category: 'cocktail', name: '椰林飘香', emoji: '🥥', price: 38, desc: '椰香菠萝，热带风情', available: true },
+  { id: 'd1', category: 'cocktail', name: '莫吉托', emoji: '🍸', price: 35, desc: '薄荷青柠，清爽一夏', available: true, image: '' },
+  { id: 'd2', category: 'cocktail', name: '长岛冰茶', emoji: '🧊', price: 40, desc: '经典长饮，后劲十足', available: true, image: '' },
+  { id: 'd3', category: 'cocktail', name: '玛格丽特', emoji: '🍹', price: 38, desc: '龙舌兰与青柠的碰撞', available: true, image: '' },
+  { id: 'd4', category: 'cocktail', name: '金汤力', emoji: '🥂', price: 30, desc: '经典金酒，简约不简单', available: true, image: '' },
+  { id: 'd5', category: 'cocktail', name: '威士忌酸', emoji: '🥃', price: 35, desc: '波本威士忌，酸甜平衡', available: true, image: '' },
+  { id: 'd6', category: 'cocktail', name: '椰林飘香', emoji: '🥥', price: 38, desc: '椰香菠萝，热带风情', available: true, image: '' },
 ];
 
 const DEFAULT_SETTINGS = {
   adminPassword: 'admin888',
   merchantWechat: 'YourWeChatID',
   shopName: '路边摊面包饼干鸡尾酒',
+  paymentQR: '',
 };
 
 // ---- Data helpers ----
@@ -630,7 +647,7 @@ function renderMenu() {
     for (const item of items) {
       html += `
         <div class="menu-card ${item.available ? '' : 'unavailable'}" onclick="${item.available ? `addToCart('${item.id}')` : ''}">
-          <div class="card-emoji">${item.emoji}</div>
+          <div class="card-emoji">${renderItemImg(item, 'item-thumb')}</div>
           <div class="card-body">
             <div class="card-name">${escHtml(item.name)}</div>
             <div class="card-desc">${escHtml(item.desc)}</div>
@@ -662,7 +679,7 @@ function renderCartItems() {
     if (!m) return '';
     return `
       <div class="cart-item">
-        <div class="cart-item-emoji">${m.emoji}</div>
+        <div class="cart-item-emoji">${renderItemImg(m, 'item-thumb-sm')}</div>
         <div class="cart-item-info">
           <div class="cart-item-name">${escHtml(m.name)}</div>
           ${c.note ? `<div class="cart-item-note">📝 ${escHtml(c.note)}</div>` : ''}
@@ -809,6 +826,13 @@ function submitOrder() {
   // Show success
   document.getElementById('orderText').textContent = text;
   document.getElementById('merchantWechat').textContent = settings.merchantWechat;
+  // Show payment QR if uploaded
+  var qrDisplay = document.getElementById('paymentQRDisplay');
+  if (settings.paymentQR) {
+    qrDisplay.innerHTML = '<img src="' + settings.paymentQR + '" style="max-width:200px;max-height:200px;border-radius:12px;border:2px solid var(--border)" alt="收款码"><p style="font-size:12px;margin-top:4px">长按识别二维码付款</p>';
+  } else {
+    qrDisplay.innerHTML = '';
+  }
   document.getElementById('btnCopy').classList.remove('copied');
   document.getElementById('btnCopy').textContent = '📋 一键复制订单';
   document.getElementById('checkoutModal').classList.remove('show');
@@ -864,7 +888,7 @@ function openAdmin() {
   if (!isAdminLoggedIn) {
     renderAdminLogin();
   } else {
-    renderAdminPanel('menu');
+    renderAdminPanel('dashboard');
   }
   document.getElementById('adminModal').classList.add('show');
   document.body.style.overflow = 'hidden';
@@ -900,18 +924,67 @@ function adminLogin() {
 }
 
 function renderAdminPanel(tab) {
+  var tabContent;
+  if (tab === 'menu') tabContent = renderAdminMenu();
+  else if (tab === 'orders') tabContent = renderAdminOrders();
+  else if (tab === 'settings') tabContent = renderAdminSettings();
+  else tabContent = renderAdminDashboard();
+
   document.getElementById('adminContent').innerHTML = `
     <div class="admin-header">
       <h2>⚙️ 商家后台</h2>
       <button class="btn btn-sm" onclick="isAdminLoggedIn=false;renderAdminLogin()">退出</button>
     </div>
     <div class="admin-tabs">
-      <div class="admin-tab ${tab==='menu'?'active':''}" onclick="renderAdminPanel('menu')">📋 菜单管理</div>
-      <div class="admin-tab ${tab==='orders'?'active':''}" onclick="renderAdminPanel('orders')">📦 订单记录</div>
+      <div class="admin-tab ${tab==='dashboard'?'active':''}" onclick="renderAdminPanel('dashboard')">📊 概览</div>
+      <div class="admin-tab ${tab==='menu'?'active':''}" onclick="renderAdminPanel('menu')">📋 菜品</div>
+      <div class="admin-tab ${tab==='orders'?'active':''}" onclick="renderAdminPanel('orders')">📦 订单</div>
       <div class="admin-tab ${tab==='settings'?'active':''}" onclick="renderAdminPanel('settings')">⚙️ 设置</div>
     </div>
-    <div id="adminTabContent">${tab === 'menu' ? renderAdminMenu() : tab === 'orders' ? renderAdminOrders() : renderAdminSettings()}</div>
+    <div id="adminTabContent">${tabContent}</div>
   `;
+}
+
+function renderAdminDashboard() {
+  var orders = loadOrders();
+  var today = new Date().toLocaleDateString('zh-CN');
+  var todayOrders = orders.filter(function(o) {
+    return new Date(o.time).toLocaleDateString('zh-CN') === today;
+  });
+  var todayRevenue = todayOrders.reduce(function(s, o) { return s + o.total; }, 0);
+  var activeItems = menu.filter(function(m) { return m.available; }).length;
+  var totalItems = menu.length;
+
+  var html = '<div class="dashboard-grid">';
+  html += '<div class="stat-card"><div class="stat-num">' + todayOrders.length + '</div><div class="stat-label">📅 今日订单</div></div>';
+  html += '<div class="stat-card"><div class="stat-num accent">¥' + todayRevenue + '</div><div class="stat-label">💰 今日营业额</div></div>';
+  html += '<div class="stat-card"><div class="stat-num">' + activeItems + '</div><div class="stat-label">✅ 在售商品</div></div>';
+  html += '<div class="stat-card"><div class="stat-num">' + totalItems + '</div><div class="stat-label">📦 总商品数</div></div>';
+  html += '</div>';
+
+  // Recent orders
+  html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot bread"></span>最近订单</div>';
+  var recent = orders.slice(0, 5);
+  if (recent.length === 0) {
+    html += '<p style="color:var(--text-secondary);font-size:13px;padding:12px 0">暂无订单</p>';
+  } else {
+    for (var i = 0; i < recent.length; i++) {
+      var o = recent[i];
+      html += '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center">';
+      html += '<div><span style="font-weight:600">' + new Date(o.time).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) + '</span> ' + o.items.map(function(i){return i.emoji+i.name+'×'+i.qty}).join(' ') + '</div>';
+      html += '<span style="font-weight:700;color:var(--accent)">¥' + o.total + '</span></div>';
+    }
+  }
+
+  // Quick actions
+  html += '<div class="cat-label" style="margin-top:16px"><span class="cat-dot cocktail"></span>快捷操作</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  html += '<button class="btn btn-primary" onclick="renderAdminPanel(\'menu\')" style="flex:1;min-width:100px">➕ 添加菜品</button>';
+  html += '<button class="btn" onclick="renderAdminPanel(\'orders\')" style="flex:1;min-width:100px">📦 查看订单</button>';
+  html += '<button class="btn" onclick="renderAdminPanel(\'settings\')" style="flex:1;min-width:100px">⚙️ 店铺设置</button>';
+  html += '</div>';
+
+  return html;
 }
 
 function renderAdminMenu() {
@@ -924,12 +997,13 @@ function renderAdminMenu() {
     for (const item of items) {
       html += `
         <div class="admin-item">
-          <div class="admin-item-emoji">${item.emoji}</div>
+          <div class="admin-item-emoji">${renderItemImg(item, 'item-thumb-sm')}</div>
           <div class="admin-item-info">
             <div class="admin-item-name">${escHtml(item.name)} ${item.available ? '' : '<span style="color:var(--danger);font-size:11px">[已下架]</span>'}</div>
             <div class="admin-item-meta">¥${item.price} · ${escHtml(item.desc)}</div>
           </div>
           <div class="admin-item-actions">
+            <button class="btn-edit" onclick="toggleItemAvailable('${item.id}')" title="${item.available?'下架':'上架'}">${item.available?'⬇️':'⬆️'}</button>
             <button class="btn-edit" onclick="showEditForm('${item.id}')" title="编辑">✎</button>
             <button class="btn-del" onclick="deleteItem('${item.id}')" title="删除">✕</button>
           </div>
@@ -943,20 +1017,29 @@ function renderAdminMenu() {
 function renderAdminOrders() {
   const orders = loadOrders();
   if (orders.length === 0) return '<p style="text-align:center;padding:40px;color:var(--text-secondary)">暂无订单记录</p>';
-  return orders.map(o => `
-    <div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-weight:700;font-size:13px">🕐 ${new Date(o.time).toLocaleString('zh-CN')}</span>
-        <span style="font-weight:800;color:var(--accent)">¥${o.total}</span>
-      </div>
-      <div style="font-size:13px">${o.items.map(i => `${i.emoji} ${i.name} ×${i.qty}`).join(' · ')}</div>
-      <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">📍 ${escHtml(o.address)} · 📞 ${escHtml(o.phone)}</div>
-      ${o.note ? `<div style="font-size:12px;color:var(--text-secondary)">📝 ${escHtml(o.note)}</div>` : ''}
-    </div>
-  `).join('');
+  return orders.map(function(o) {
+    var timeStr = new Date(o.time).toLocaleString('zh-CN');
+    var itemsStr = o.items.map(function(i) { return i.emoji + ' ' + i.name + ' ×' + i.qty; }).join(' · ');
+    var noteHtml = o.note ? '<div style="font-size:12px;color:var(--text-secondary)">📝 ' + escHtml(o.note) + '</div>' : '';
+    return '<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px;margin-bottom:10px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+        '<span style="font-weight:700;font-size:13px">🕐 ' + timeStr + '</span>' +
+        '<span style="font-weight:800;color:var(--accent)">¥' + o.total + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px">' + itemsStr + '</div>' +
+      '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">📍 ' + escHtml(o.address) + ' · 📞 ' + escHtml(o.phone) + '</div>' +
+      noteHtml +
+      '<div style="text-align:right;margin-top:8px">' +
+        '<button class="btn btn-sm" style="color:var(--danger);border-color:var(--danger);font-size:11px" onclick="deleteOrder(\'' + o.id + '\')">🗑 删除</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
 }
 
 function renderAdminSettings() {
+  var paymentQrHtml = settings.paymentQR
+    ? '<img src="' + settings.paymentQR + '" style="max-width:180px;max-height:180px;border-radius:var(--radius-sm);border:2px solid var(--border);margin-bottom:8px">'
+    : '';
   return `
     <div class="form-group">
       <label class="form-label">🏪 店铺名称</label>
@@ -965,6 +1048,12 @@ function renderAdminSettings() {
     <div class="form-group">
       <label class="form-label">💬 商家微信号（显示给顾客）</label>
       <input class="form-input" id="setWechat" value="${escHtml(settings.merchantWechat)}" placeholder="如：breadmaster888">
+    </div>
+    <div class="form-group">
+      <label class="form-label">💳 微信收款码图片</label>
+      <input type="file" accept="image/*" id="paymentQRFile" onchange="previewImage(this, 'paymentQRPreview')" style="font-size:13px">
+      <div id="paymentQRPreview" style="margin-top:8px">${paymentQrHtml}</div>
+      <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">上传后在顾客下单页面显示，方便直接扫码付款</p>
     </div>
     <div class="form-group">
       <label class="form-label">🔐 管理密码</label>
@@ -982,11 +1071,25 @@ function renderAdminSettings() {
 function saveAdminSettings() {
   settings.shopName = document.getElementById('setShopName').value.trim() || DEFAULT_SETTINGS.shopName;
   settings.merchantWechat = document.getElementById('setWechat').value.trim() || DEFAULT_SETTINGS.merchantWechat;
-  const newPwd = document.getElementById('setPassword').value.trim();
+  var newPwd = document.getElementById('setPassword').value.trim();
   if (newPwd) settings.adminPassword = newPwd;
-  saveSettings(settings);
-  isAdminLoggedIn = true;
-  showToast('设置已保存');
+
+  var doSave = function() {
+    saveSettings(settings);
+    checkStorageUsage();
+    isAdminLoggedIn = true;
+    showToast('设置已保存');
+  };
+
+  var qrFile = document.getElementById('paymentQRFile');
+  if (qrFile && qrFile.files && qrFile.files[0]) {
+    handleImageUpload(qrFile.files[0], function(dataUrl) {
+      settings.paymentQR = dataUrl;
+      doSave();
+    });
+  } else {
+    doSave();
+  }
 }
 
 function showAddForm() {
@@ -994,16 +1097,21 @@ function showAddForm() {
     <div class="admin-add-form">
       <h3>➕ 添加新菜品</h3>
       <div class="form-group">
+        <label class="form-label">产品图片</label>
+        <input type="file" accept="image/*" id="addImageFile" onchange="previewImage(this, 'addImgPreview')" style="font-size:13px">
+        <div id="addImgPreview" style="margin-top:8px"></div>
+        <div class="form-group" style="margin-top:8px">
+          <label class="form-label">或 Emoji 图标（无图片时显示）</label>
+          <input class="form-input" id="addEmoji" placeholder="如：🥖" maxlength="4">
+        </div>
+      </div>
+      <div class="form-group">
         <label class="form-label">分类</label>
         <select class="form-input" id="addCat">
           <option value="bread">🍞 面包</option>
           <option value="cookie">🍪 饼干</option>
           <option value="cocktail">🍸 鸡尾酒</option>
         </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji 图标</label>
-        <input class="form-input" id="addEmoji" placeholder="如：🥖" maxlength="4">
       </div>
       <div class="form-group">
         <label class="form-label">名称</label>
@@ -1026,23 +1134,34 @@ function showAddForm() {
 }
 
 function addNewItem() {
-  const cat = document.getElementById('addCat').value;
-  const emoji = document.getElementById('addEmoji').value.trim() || '📦';
-  const name = document.getElementById('addName').value.trim();
-  const desc = document.getElementById('addDesc').value.trim() || '美味可口';
-  const price = parseInt(document.getElementById('addPrice').value) || 0;
+  var cat = document.getElementById('addCat').value;
+  var emoji = document.getElementById('addEmoji').value.trim() || '📦';
+  var name = document.getElementById('addName').value.trim();
+  var desc = document.getElementById('addDesc').value.trim() || '美味可口';
+  var price = parseInt(document.getElementById('addPrice').value) || 0;
   if (!name) { showToast('请输入菜品名称'); return; }
   if (price <= 0) { showToast('请输入有效价格'); return; }
 
-  const newItem = {
-    id: Date.now().toString(36),
-    category: cat, emoji, name, desc, price, available: true
+  var doAdd = function(imageData) {
+    var newItem = {
+      id: Date.now().toString(36),
+      category: cat, emoji: emoji, name: name, desc: desc, price: price,
+      available: true, image: imageData || ''
+    };
+    menu.unshift(newItem);
+    saveMenu(menu);
+    checkStorageUsage();
+    renderMenu();
+    renderAdminPanel('menu');
+    showToast('已添加：' + emoji + ' ' + name);
   };
-  menu.unshift(newItem);
-  saveMenu(menu);
-  renderMenu();
-  renderAdminPanel('menu');
-  showToast(`已添加：${emoji} ${name}`);
+
+  var fileInput = document.getElementById('addImageFile');
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    handleImageUpload(fileInput.files[0], doAdd);
+  } else {
+    doAdd('');
+  }
 }
 
 function showEditForm(itemId) {
@@ -1052,16 +1171,21 @@ function showEditForm(itemId) {
     <div class="admin-add-form">
       <h3>✎ 编辑菜品</h3>
       <div class="form-group">
+        <label class="form-label">产品图片</label>
+        <input type="file" accept="image/*" id="editImageFile" onchange="previewImage(this, 'editImgPreview')" style="font-size:13px">
+        <div id="editImgPreview" style="margin-top:8px">${item.image ? '<img src="'+item.image+'" style="max-width:120px;max-height:120px;border-radius:8px">' : ''}</div>
+        <div class="form-group" style="margin-top:8px">
+          <label class="form-label">或 Emoji 图标（无图片时显示）</label>
+          <input class="form-input" id="editEmoji" value="${escHtml(item.emoji)}" maxlength="4">
+        </div>
+      </div>
+      <div class="form-group">
         <label class="form-label">分类</label>
         <select class="form-input" id="editCat">
           <option value="bread" ${item.category==='bread'?'selected':''}>🍞 面包</option>
           <option value="cookie" ${item.category==='cookie'?'selected':''}>🍪 饼干</option>
           <option value="cocktail" ${item.category==='cocktail'?'selected':''}>🍸 鸡尾酒</option>
         </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji 图标</label>
-        <input class="form-input" id="editEmoji" value="${escHtml(item.emoji)}" maxlength="4">
       </div>
       <div class="form-group">
         <label class="form-label">名称</label>
@@ -1090,7 +1214,7 @@ function showEditForm(itemId) {
 }
 
 function saveEditItem(itemId) {
-  const item = menu.find(m => m.id === itemId);
+  var item = menu.find(function(m) { return m.id === itemId; });
   if (!item) return;
   item.category = document.getElementById('editCat').value;
   item.emoji = document.getElementById('editEmoji').value.trim() || '📦';
@@ -1100,10 +1224,34 @@ function saveEditItem(itemId) {
   item.available = document.getElementById('editAvailable').checked;
   if (!item.name) { showToast('请输入菜品名称'); return; }
   if (item.price <= 0) { showToast('请输入有效价格'); return; }
+
+  var doSave = function(imageData) {
+    if (imageData) item.image = imageData;
+    else if (imageData === '') item.image = ''; // explicitly cleared
+    saveMenu(menu);
+    checkStorageUsage();
+    renderMenu();
+    renderAdminPanel('menu');
+    showToast('已更新：' + item.emoji + ' ' + item.name);
+  };
+
+  var fileInput = document.getElementById('editImageFile');
+  if (fileInput && fileInput.files && fileInput.files[0]) {
+    handleImageUpload(fileInput.files[0], doSave);
+  } else {
+    doSave(null); // null = keep existing image
+  }
+}
+
+function toggleItemAvailable(itemId) {
+  const item = menu.find(m => m.id === itemId);
+  if (!item) return;
+  item.available = !item.available;
   saveMenu(menu);
   renderMenu();
   renderAdminPanel('menu');
-  showToast(`已更新：${item.emoji} ${item.name}`);
+  updateCartUI();
+  showToast(item.available ? `已上架：${item.name}` : `已下架：${item.name}`);
 }
 
 function deleteItem(itemId) {
@@ -1111,13 +1259,20 @@ function deleteItem(itemId) {
   if (!item) return;
   if (!confirm(`确定删除「${item.name}」吗？此操作不可恢复。`)) return;
   menu = menu.filter(m => m.id !== itemId);
-  // Also remove from cart
   cart = cart.filter(c => c.id !== itemId);
   saveMenu(menu);
   renderMenu();
   renderAdminPanel('menu');
   updateCartUI();
   showToast(`已删除：${item.name}`);
+}
+
+function deleteOrder(orderId) {
+  if (!confirm('确定删除这条订单记录吗？')) return;
+  const orders = loadOrders();
+  saveOrders(orders.filter(o => o.id !== orderId));
+  renderAdminPanel('orders');
+  showToast('订单已删除');
 }
 
 function resetMenu() {
@@ -1277,6 +1432,78 @@ function escHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+// Image upload: FileReader → compressed base64
+function handleImageUpload(file, callback, maxKB) {
+  maxKB = maxKB || 80;
+  if (!file) return;
+  if (!file.type.match(/image\/(jpeg|png|webp|gif)/)) {
+    showToast('仅支持 JPG/PNG/WebP/GIF 图片');
+    return;
+  }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      // Scale down if needed: max dimension 300px
+      var maxDim = 300;
+      var w = img.width, h = img.height;
+      if (w > maxDim || h > maxDim) {
+        var ratio = Math.min(maxDim / w, maxDim / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      // Compress to JPEG ~80KB
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      if (dataUrl.length > maxKB * 1024) {
+        dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+      }
+      callback(dataUrl);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Preview uploaded image in the form
+function previewImage(fileInput, previewId) {
+  var file = fileInput.files && fileInput.files[0];
+  var preview = document.getElementById(previewId);
+  if (!preview) return;
+  if (!file) { preview.innerHTML = ''; return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    preview.innerHTML = '<img src="' + e.target.result + '" style="max-width:120px;max-height:120px;border-radius:8px;border:2px solid var(--border)">';
+  };
+  reader.readAsDataURL(file);
+}
+
+// Check total localStorage usage
+  var total = 0;
+  for (var i = 0; i < localStorage.length; i++) {
+    total += localStorage.getItem(localStorage.key(i)).length;
+  }
+  // >4MB warning (limit is ~5MB)
+  if (total > 4 * 1024 * 1024) {
+    showToast('⚠️ 存储空间接近上限，建议清理旧图片');
+  }
+}
+
+function getItemImage(item) {
+  return item.image || '';
+}
+
+function renderItemImg(item, cls) {
+  cls = cls || '';
+  var img = getItemImage(item);
+  if (img) return '<img src="' + img + '" class="' + cls + '" alt="' + escHtml(item.name) + '" loading="lazy">';
+  return '<span class="' + cls + '">' + item.emoji + '</span>';
 }
 
 // ╔══════════════════════════════════════════╗
