@@ -227,8 +227,7 @@ body {
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 110;
   display: flex; align-items: flex-end; justify-content: center;
-  opacity: 0; visibility: hidden; transition: all 0.3s;
-  backdrop-filter: blur(2px);
+  opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0.3s;
 }
 .modal-overlay.show { opacity: 1; visibility: visible; }
 .modal {
@@ -1040,19 +1039,11 @@ function submitOrder() {
   // Show payment QR if uploaded
   var qrDisplay = document.getElementById('paymentQRDisplay');
   if (settings.paymentQR) {
-    // Convert base64 to blob URL for better WeChat long-press compatibility
-    var qrSrc = settings.paymentQR;
-    try {
-      if (qrSrc.startsWith('data:')) {
-        var parts = qrSrc.split(',');
-        var mime = parts[0].match(/:(.*?);/)[1];
-        var binary = atob(parts[1]);
-        var bytes = new Uint8Array(binary.length);
-        for (var b = 0; b < binary.length; b++) bytes[b] = binary.charCodeAt(b);
-        qrSrc = URL.createObjectURL(new Blob([bytes], {type: mime}));
-      }
-    } catch(e) {}
-    qrDisplay.innerHTML = '<img src="' + qrSrc + '" style="width:220px;height:220px;border-radius:12px;border:2px solid var(--border);object-fit:contain;-webkit-touch-callout:default;user-select:auto" alt="收款码"><p style="font-size:12px;margin-top:6px">📱 长按上方图片 → 识别图中二维码 → 付款</p>';
+    qrDisplay.innerHTML = '<div style="background:#fff;padding:12px;border-radius:12px;display:inline-block;touch-action:manipulation;-webkit-touch-callout:default">' +
+      '<img src="' + settings.paymentQR + '" style="width:220px;height:220px;border-radius:8px;object-fit:contain;display:block;touch-action:manipulation;-webkit-touch-callout:default;user-select:auto;pointer-events:auto" alt="收款码" id="paymentQRImg">' +
+      '</div>' +
+      '<p style="font-size:13px;margin-top:8px;font-weight:600">👆 长按上方二维码 → 识别图中二维码</p>' +
+      '<button class="btn btn-sm" onclick="saveQRImage()" style="margin-top:4px;font-size:12px">💾 保存收款码到相册</button>';
   } else {
     qrDisplay.innerHTML = '';
   }
@@ -1101,6 +1092,19 @@ function openWechat() {
   setTimeout(() => {
     showToast('如未跳转，请手动打开微信粘贴订单');
   }, 1000);
+}
+
+function saveQRImage() {
+  var img = document.getElementById('paymentQRImg');
+  if (!img || !img.src) { showToast('暂无收款码图片'); return; }
+  // Create a downloadable link
+  var a = document.createElement('a');
+  a.href = img.src;
+  a.download = '收款码.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast('已下载收款码，请到相册查看');
 }
 
 // ╔══════════════════════════════════════════╗
