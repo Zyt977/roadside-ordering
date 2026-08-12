@@ -916,7 +916,7 @@ function adminLogin() {
   const input = document.getElementById('adminPwdInput').value.trim();
   if (input === settings.adminPassword) {
     isAdminLoggedIn = true;
-    renderAdminPanel('menu');
+    renderAdminPanel('dashboard');
     showToast('登录成功');
   } else {
     showToast('密码错误');
@@ -1485,6 +1485,7 @@ function previewImage(fileInput, previewId) {
 }
 
 // Check total localStorage usage
+function checkStorageUsage() {
   var total = 0;
   for (var i = 0; i < localStorage.length; i++) {
     total += localStorage.getItem(localStorage.key(i)).length;
