@@ -996,10 +996,10 @@ function submitOrder() {
   const now = new Date();
   const timeStr = now.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   let text = '🛒 新订单来啦！\n';
-  text += '━━━━━━━━\n';
+  text += '━━━━━━━━━━━━\n';
   text += `🏪 ${settings.shopName}\n`;
   text += `🕐 ${timeStr}\n`;
-  text += '━━━━━━━━\n';
+  text += '━━━━━━━━━━━━\n';
   text += '📦 订单详情：\n';
   for (const c of cart) {
     const m = menu.find(i => i.id === c.id);
@@ -1007,13 +1007,13 @@ function submitOrder() {
     text += `  ${m.emoji} ${m.name} ×${c.qty}  ¥${m.price * c.qty}\n`;
     if (c.note) text += `    📝 ${c.note}\n`;
   }
-  text += '━━━━━━━━\n';
+  text += '━━━━━━━━━━━━\n';
   text += `💰 合计：¥${cartTotal()}\n`;
-  text += '━━━━━━━━\n';
+  text += '━━━━━━━━━━━━\n';
   text += `📍 地址：${address}\n`;
   text += `📞 电话：${phone}\n`;
   if (note) text += `📝 备注：${note}\n`;
-  text += '━━━━━━━━\n';
+  text += '━━━━━━━━━━━━\n';
   text += `💳 请微信转账至：${settings.merchantWechat}`;
 
   // Save order to Supabase + local
