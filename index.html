@@ -441,7 +441,6 @@ body {
       <label class="form-label">📝 订单备注</label>
       <textarea class="form-textarea" id="inputNote" placeholder="如：多放黄油、不要辣、放门口即可…" maxlength="200"></textarea>
     </div>
-    <div id="checkoutPaymentQR" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);text-align:center"></div>
     <button class="btn-checkout" onclick="submitOrder()">✅ 提交订单</button>
   </div>
 </div>
@@ -458,7 +457,7 @@ body {
       <button class="btn-copy" id="btnCopy" onclick="copyOrder()">📋 一键复制订单</button>
       <button class="btn-wechat" onclick="openWechat()">💬 打开微信发送</button>
       <div class="payment-hint" id="paymentHint">
-        <div id="paymentQRDisplay" style="text-align:center;margin-bottom:8px"></div>
+
         💡 <strong>支付方式：</strong>请通过微信转账付款，商家确认后即安排制作配送。<br>
         微信号：<strong id="merchantWechat"></strong>
       </div>
@@ -972,36 +971,11 @@ function toggleCart() {
 // ║           CHECKOUT FLOW                 ║
 // ╚══════════════════════════════════════════╝
 
-function renderPaymentQR(container, qrData) {
-  if (!qrData) { container.innerHTML = ''; return; }
-  var img = new Image();
-  img.onload = function() {
-    var c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
-    c.style.cssText = 'width:200px;height:200px;display:block;margin:0 auto;border-radius:8px;border:1px solid #ddd';
-    c.getContext('2d').drawImage(img, 0, 0);
-    container.innerHTML = '';
-    container.appendChild(c);
-    var hint = document.createElement('p');
-    hint.style.cssText = 'font-size:12px;color:#888;margin-top:6px';
-    hint.textContent = '👆 长按识别二维码付款';
-    container.appendChild(hint);
-  };
-  img.onerror = function() {
-    // Fallback to plain img
-    container.innerHTML = '<img src="' + qrData + '" style="width:200px;height:200px;display:block;margin:0 auto;border-radius:8px;border:1px solid #ddd"><p style="font-size:12px;color:#888;margin-top:6px">👆 长按识别二维码付款</p>';
-  };
-  img.src = qrData;
-}
-
 async function openCheckout() {
   if (cart.length === 0) { showToast('购物车是空的'); return; }
   // Refresh settings from cloud to ensure payment info is current
   try { settings = await loadSettings(); } catch(e) {}
   renderCheckoutSummary();
-  // Show payment QR in checkout page (canvas for WeChat compatibility)
-  var qrDiv = document.getElementById('checkoutPaymentQR');
-  renderPaymentQR(qrDiv, settings.paymentQR);
   document.getElementById('checkoutModal').classList.add('show');
   document.body.style.overflow = 'hidden';
 }
@@ -1062,9 +1036,6 @@ function submitOrder() {
   // Show success
   document.getElementById('orderText').textContent = text;
   document.getElementById('merchantWechat').textContent = settings.merchantWechat;
-  // Show payment QR if uploaded
-  var qrDisplay = document.getElementById('paymentQRDisplay');
-  renderPaymentQR(qrDisplay, settings.paymentQR);
   document.getElementById('btnCopy').classList.remove('copied');
   document.getElementById('btnCopy').textContent = '📋 一键复制订单';
   document.getElementById('checkoutModal').classList.remove('show');
@@ -1308,9 +1279,6 @@ function renderAdminSettings() {
   loadSettings().then(function(freshSettings) {
     settings = freshSettings;
     if (!document.getElementById(targetId)) return;
-    var paymentQrHtml = settings.paymentQR
-      ? '<img src="' + settings.paymentQR + '" style="max-width:180px;max-height:180px;border-radius:var(--radius-sm);border:2px solid var(--border);margin-bottom:8px">'
-      : '';
     document.getElementById(targetId).innerHTML = `
     <div class="form-group">
       <label class="form-label">🏪 店铺名称</label>
@@ -1319,12 +1287,6 @@ function renderAdminSettings() {
     <div class="form-group">
       <label class="form-label">💬 商家微信号（显示给顾客）</label>
       <input class="form-input" id="setWechat" value="${escHtml(settings.merchantWechat)}" placeholder="如：breadmaster888">
-    </div>
-    <div class="form-group">
-      <label class="form-label">💳 微信收款码图片</label>
-      <input type="file" accept="image/*" id="paymentQRFile" onchange="previewImage(this, 'paymentQRPreview')" style="font-size:13px">
-      <div id="paymentQRPreview" style="margin-top:8px">${paymentQrHtml}</div>
-      <p style="font-size:11px;color:var(--text-secondary);margin-top:4px">上传后在顾客下单页面显示，方便直接扫码付款</p>
     </div>
     <div class="form-group">
       <label class="form-label">🔐 管理密码</label>
@@ -1350,26 +1312,14 @@ function saveAdminSettings() {
   var newPwd = document.getElementById('setPassword').value.trim();
   if (newPwd) settings.adminPassword = newPwd;
 
-  var doSave = function() {
-    saveSettingsData(settings).then(function() {
-      showToast('设置已保存并同步 ✅');
-    }).catch(function() {
-      showToast('已保存到本地，云端同步失败 ⚠️');
-    });
-    checkStorageUsage();
-    isAdminLoggedIn = true;
-    updateSyncStatus(sbOnline ? 'online' : 'offline');
-  };
-
-  var qrFile = document.getElementById('paymentQRFile');
-  if (qrFile && qrFile.files && qrFile.files[0]) {
-    handleImageUpload(qrFile.files[0], function(dataUrl) {
-      settings.paymentQR = dataUrl;
-      doSave();
-    });
-  } else {
-    doSave();
-  }
+  saveSettingsData(settings).then(function() {
+    showToast('设置已保存并同步 ✅');
+  }).catch(function() {
+    showToast('已保存到本地，云端同步失败 ⚠️');
+  });
+  checkStorageUsage();
+  isAdminLoggedIn = true;
+  updateSyncStatus(sbOnline ? 'online' : 'offline');
 }
 
 function showAddForm() {
