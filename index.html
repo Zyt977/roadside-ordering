@@ -1115,7 +1115,7 @@ function renderAdminLogin() {
     <h2>🔐 商家登录</h2>
     <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px">请输入管理密码</p>
     <div class="form-group">
-      <input class="form-input" id="adminPwdInput" type="password" placeholder="输入密码" onkeydown="if(event.key==='Enter')adminLogin()">
+      <input class="form-input" id="adminPwdInput" type="text" placeholder="输入密码" onkeydown="if(event.key==='Enter')adminLogin()">
     </div>
     <button class="btn-checkout" onclick="adminLogin()">登录</button>
     <p style="font-size:11px;color:var(--text-secondary);margin-top:12px;text-align:center">默认密码：admin888（请尽快修改）</p>
