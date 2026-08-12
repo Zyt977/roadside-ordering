@@ -1040,7 +1040,19 @@ function submitOrder() {
   // Show payment QR if uploaded
   var qrDisplay = document.getElementById('paymentQRDisplay');
   if (settings.paymentQR) {
-    qrDisplay.innerHTML = '<img src="' + settings.paymentQR + '" style="max-width:200px;max-height:200px;border-radius:12px;border:2px solid var(--border)" alt="收款码"><p style="font-size:12px;margin-top:4px">长按识别二维码付款</p>';
+    // Convert base64 to blob URL for better WeChat long-press compatibility
+    var qrSrc = settings.paymentQR;
+    try {
+      if (qrSrc.startsWith('data:')) {
+        var parts = qrSrc.split(',');
+        var mime = parts[0].match(/:(.*?);/)[1];
+        var binary = atob(parts[1]);
+        var bytes = new Uint8Array(binary.length);
+        for (var b = 0; b < binary.length; b++) bytes[b] = binary.charCodeAt(b);
+        qrSrc = URL.createObjectURL(new Blob([bytes], {type: mime}));
+      }
+    } catch(e) {}
+    qrDisplay.innerHTML = '<img src="' + qrSrc + '" style="width:220px;height:220px;border-radius:12px;border:2px solid var(--border);object-fit:contain;-webkit-touch-callout:default;user-select:auto" alt="收款码"><p style="font-size:12px;margin-top:6px">📱 长按上方图片 → 识别图中二维码 → 付款</p>';
   } else {
     qrDisplay.innerHTML = '';
   }
